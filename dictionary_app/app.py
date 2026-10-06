@@ -8,6 +8,7 @@ from html import escape
 from pathlib import Path
 import sys
 from typing import Callable
+from urllib.parse import quote, urlsplit
 
 from PySide6.QtCore import QObject, QRect, QSize, QThread, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QTextCharFormat, QTextCursor, QTextDocument
@@ -25,6 +26,7 @@ from .research import ImageCandidate, ResearchResult, download_image, research_t
 from .siwc import SIWCClient, SIWCError
 from .storage import DictionaryStore, Entry, ImageRecord
 from .theme import STYLE
+from .webpage_research import research_webpage
 
 
 CATEGORIES = (
@@ -59,6 +61,13 @@ def clear_layout(layout: QVBoxLayout | QHBoxLayout) -> None:
         elif item.layout():
             clear_layout(item.layout())
             item.layout().deleteLater()
+
+
+def is_https_url(value: str) -> bool:
+    try:
+        return urlsplit(value).scheme.lower() == "https"
+    except ValueError:
+        return False
 
 
 class Job(QObject):
@@ -151,12 +160,12 @@ class ImageChoice(QFrame):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(7)
-        self.preview = QLabel("加载图片中…")
+        self.preview = QLabel("Loading image…")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setFixedHeight(105)
         self.preview.setStyleSheet("background:#f1f4ed; border-radius:8px; color:#8a9a8d;")
         root.addWidget(self.preview)
-        self.check = QCheckBox("收进字典")
+        self.check = QCheckBox("Add to entry")
         root.addWidget(self.check)
         title = label(candidate.title.removeprefix("File:")[:50], "", True)
         title.setMaximumHeight(35)
@@ -164,7 +173,7 @@ class ImageChoice(QFrame):
         credit = label((candidate.license or "See license")[:35], "muted")
         credit.setToolTip(candidate.attribution or candidate.license)
         root.addWidget(credit)
-        source = QPushButton("查看图片来源 ↗")
+        source = QPushButton("Image source ↗")
         source.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(candidate.description_url)))
         root.addWidget(source)
         root.addStretch()
@@ -176,7 +185,7 @@ class ImageChoice(QFrame):
                                                  Qt.TransformationMode.SmoothTransformation))
             self.preview.setText("")
         else:
-            self.preview.setText("无法预览")
+            self.preview.setText("Preview unavailable")
 
 
 class MainWindow(QMainWindow):
@@ -189,7 +198,6 @@ class MainWindow(QMainWindow):
         except SIWCError as exc:
             self.chatgpt = None
             self.chatgpt_error = str(exc)
-        self.signin_declined = False
         self.pending_search: tuple[str, str] | None = None
         self.result: ResearchResult | None = None
         self.current_entry: Entry | None = None
@@ -211,8 +219,8 @@ class MainWindow(QMainWindow):
         self._closing = False
         self.setWindowTitle("Little Atlas · Personal Dictionary")
         self.setWindowIcon(QIcon(str(asset_path("little-atlas.png"))))
-        self.setMinimumSize(900, 620)
-        self.resize(1060, 700)
+        self.setMinimumSize(800, 225)
+        self.resize(800, 232)
         self._make_ui()
         self._refresh_catalog()
         self._show_home()
@@ -228,20 +236,8 @@ class MainWindow(QMainWindow):
         body = QWidget()
         root_layout.addWidget(body, 1)
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(25, 16, 25, 16)
+        body_layout.setContentsMargins(22, 16, 22, 16)
         body_layout.setSpacing(0)
-        top = QHBoxLayout()
-        self.menu_button = QToolButton()
-        self.menu_button.setObjectName("chromeIcon")
-        self.menu_button.setIcon(icon("menu"))
-        self.menu_button.setIconSize(QSize(21, 21))
-        self.menu_button.setFixedSize(42, 42)
-        self.menu_button.setToolTip("打开目录")
-        self.menu_button.setAccessibleName("打开目录")
-        self.menu_button.clicked.connect(self._toggle_menu)
-        top.addStretch()
-        top.addWidget(self.menu_button)
-        body_layout.addLayout(top)
         self.pages = QStackedWidget()
         body_layout.addWidget(self.pages, 1)
         self.home_page = self._make_home_page()
@@ -265,15 +261,15 @@ class MainWindow(QMainWindow):
         left.setContentsMargins(23, 24, 23, 22)
         left.setSpacing(14)
         drawer_top = QHBoxLayout()
-        drawer_top.addWidget(label("目录", "brand"))
+        drawer_top.addWidget(label("Contents", "brand"))
         drawer_top.addStretch()
         close_menu = QToolButton()
         close_menu.setObjectName("chromeIcon")
         close_menu.setIcon(icon("close"))
         close_menu.setIconSize(QSize(18, 18))
         close_menu.setFixedSize(38, 38)
-        close_menu.setToolTip("关闭目录")
-        close_menu.setAccessibleName("关闭目录")
+        close_menu.setToolTip("Close contents")
+        close_menu.setAccessibleName("Close contents")
         close_menu.clicked.connect(self._close_menu)
         drawer_top.addWidget(close_menu)
         left.addLayout(drawer_top)
@@ -285,6 +281,8 @@ class MainWindow(QMainWindow):
         self.sidebar.hide()
         self.menu_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         self.menu_shortcut.activated.connect(self._close_menu)
+        self.contents_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.contents_shortcut.activated.connect(self._toggle_menu)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -301,7 +299,6 @@ class MainWindow(QMainWindow):
             self._place_sidebar()
             self.sidebar.show()
             self.sidebar.raise_()
-            self.menu_button.setToolTip("关闭目录")
             self.catalog.setFocus()
         else:
             self._close_menu()
@@ -309,7 +306,6 @@ class MainWindow(QMainWindow):
     def _close_menu(self) -> None:
         if not self.sidebar.isHidden():
             self.sidebar.hide()
-            self.menu_button.setToolTip("打开目录")
             if self.pages.currentWidget() is self.home_page:
                 self.topic_input.setFocus()
 
@@ -324,48 +320,45 @@ class MainWindow(QMainWindow):
         centered.addStretch(1)
         self.input_shell = QFrame()
         self.input_shell.setObjectName("inputShell")
-        self.input_shell.setFixedSize(760, 145)
+        self.input_shell.setFixedSize(740, 176)
         shadow = QGraphicsDropShadowEffect(self.input_shell)
-        shadow.setBlurRadius(34)
-        shadow.setOffset(0, 11)
+        shadow.setBlurRadius(30)
+        shadow.setOffset(0, 8)
         shadow.setColor(QColor(29, 35, 32, 20))
         self.input_shell.setGraphicsEffect(shadow)
         shell_layout = QVBoxLayout(self.input_shell)
-        shell_layout.setContentsMargins(22, 18, 22, 18)
-        shell_layout.setSpacing(0)
-        shell_layout.addStretch(1)
-        self.search_bar = QFrame()
-        self.search_bar.setObjectName("searchBar")
-        self.search_bar.setFixedHeight(78)
-        controls = QHBoxLayout(self.search_bar)
-        controls.setContentsMargins(10, 6, 10, 6)
+        shell_layout.setContentsMargins(20, 14, 20, 13)
+        shell_layout.setSpacing(5)
+        self.topic_input = ComposerInput()
+        self.topic_input.setObjectName("topicInput")
+        self.topic_input.setPlaceholderText("Search a topic or write what you learned…")
+        self.topic_input.setFixedHeight(100)
+        self.topic_input.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.topic_input.submitted.connect(self._explore)
+        shell_layout.addWidget(self.topic_input, 1)
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(4)
         self.mic_button = QToolButton()
         self.mic_button.setObjectName("composerIcon")
         self.mic_button.setIcon(icon("mic"))
         self.mic_button.setIconSize(QSize(20, 20))
         self.mic_button.setFixedSize(44, 44)
-        self.mic_button.setToolTip("录音：点击选择中文或 English")
-        self.mic_button.setAccessibleName("录音")
+        self.mic_button.setToolTip("Dictate in Chinese or English")
+        self.mic_button.setAccessibleName("Dictate")
         self.mic_button.clicked.connect(self._toggle_voice)
         self.voice_menu = QMenu(self.mic_button)
-        self.voice_menu.addAction("中文录音", lambda: self._start_voice("zh"))
-        self.voice_menu.addAction("English recording", lambda: self._start_voice("en"))
+        self.voice_menu.addAction("Dictate in Chinese", lambda: self._start_voice("zh"))
+        self.voice_menu.addAction("Dictate in English", lambda: self._start_voice("en"))
         controls.addWidget(self.mic_button)
-        self.topic_input = ComposerInput()
-        self.topic_input.setObjectName("topicInput")
-        self.topic_input.setPlaceholderText("输入今天学到的内容…")
-        self.topic_input.setFixedHeight(48)
-        self.topic_input.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.topic_input.submitted.connect(self._explore)
-        controls.addWidget(self.topic_input, 1)
+        controls.addStretch()
         self.explore_button = QToolButton()
         self.explore_button.setObjectName("exploreIcon")
         self.explore_button.setIcon(icon("search", "#ffffff"))
         self.explore_button.setIconSize(QSize(20, 20))
         self.explore_button.setFixedSize(44, 44)
-        self.explore_button.setToolTip("搜索相关英文知识")
-        self.explore_button.setAccessibleName("搜索相关英文知识")
+        self.explore_button.setToolTip("Search English sources")
+        self.explore_button.setAccessibleName("Search English sources")
         self.explore_button.clicked.connect(self._explore)
         self.explore_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.explore_button.customContextMenuRequested.connect(self._show_search_options)
@@ -375,11 +368,11 @@ class MainWindow(QMainWindow):
         self.plus_button.setIcon(icon("plus"))
         self.plus_button.setIconSize(QSize(20, 20))
         self.plus_button.setFixedSize(44, 44)
-        self.plus_button.setToolTip("手动添加英文词条")
-        self.plus_button.setAccessibleName("手动添加英文词条")
+        self.plus_button.setToolTip("Add an English entry")
+        self.plus_button.setAccessibleName("Add an English entry")
         self.plus_button.clicked.connect(self._add_current)
         controls.addWidget(self.plus_button)
-        shell_layout.addWidget(self.search_bar)
+        shell_layout.addLayout(controls)
         centered.addWidget(self.input_shell)
         centered.addStretch(1)
         layout.addLayout(centered)
@@ -408,14 +401,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         heading = QHBoxLayout()
-        back = QPushButton("← 目录")
+        back = QPushButton("← Contents")
         back.clicked.connect(self._show_home)
         heading.addWidget(back)
         heading.addStretch()
-        extend = QPushButton("＋ 查找更多内容")
+        extend = QPushButton("＋ Find more")
         extend.clicked.connect(self._extend_entry)
         heading.addWidget(extend)
-        delete = QPushButton("删除词条")
+        delete = QPushButton("Delete entry")
         delete.setObjectName("danger")
         delete.clicked.connect(self._delete_entry)
         heading.addWidget(delete)
@@ -432,14 +425,14 @@ class MainWindow(QMainWindow):
         self.reader_category.currentTextChanged.connect(self._queue_save)
         metadata.addWidget(self.reader_category)
         self.reader_subcategory = QLineEdit()
-        self.reader_subcategory.setPlaceholderText("Subchapter / 小章节")
+        self.reader_subcategory.setPlaceholderText("Subchapter")
         self.reader_subcategory.textChanged.connect(self._queue_save)
         metadata.addWidget(self.reader_subcategory, 1)
-        self.source_button = QPushButton("打开资料来源 ↗")
+        self.source_button = QPushButton("Open source ↗")
         self.source_button.clicked.connect(self._open_source)
         metadata.addWidget(self.source_button)
         layout.addLayout(metadata)
-        self.original_button = QPushButton("查看最初输入")
+        self.original_button = QPushButton("View original input")
         self.original_button.clicked.connect(lambda: self.original_note.setVisible(not self.original_note.isVisible()))
         layout.addWidget(self.original_button, alignment=Qt.AlignmentFlag.AlignLeft)
         self.original_note = label("", "muted", True)
@@ -450,20 +443,20 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("toolbar")
         tools = QHBoxLayout(toolbar)
         tools.setContentsMargins(9, 7, 9, 7)
-        tools.addWidget(label("选中正文后标注：", "muted"))
-        yellow = QPushButton("黄色荧光笔")
+        tools.addWidget(label("Select text to mark:", "muted"))
+        yellow = QPushButton("Highlight")
         yellow.setObjectName("yellowPen")
         yellow.clicked.connect(lambda: self._mark_text("yellow"))
         tools.addWidget(yellow)
-        red = QPushButton("红笔")
+        red = QPushButton("Red pen")
         red.setObjectName("redPen")
         red.clicked.connect(lambda: self._mark_text("red"))
         tools.addWidget(red)
-        clear = QPushButton("清除标注")
+        clear = QPushButton("Clear marks")
         clear.clicked.connect(lambda: self._mark_text("clear"))
         tools.addWidget(clear)
         tools.addStretch()
-        save = QPushButton("保存")
+        save = QPushButton("Save")
         save.setObjectName("primary")
         save.clicked.connect(self._save_reader)
         tools.addWidget(save)
@@ -533,15 +526,24 @@ class MainWindow(QMainWindow):
         self._save_reader()
         self.result = None
         self.research_scroll.hide()
-        self.input_shell.setFixedHeight(145)
+        self.input_shell.setFixedHeight(176)
+        self.topic_input.setFixedHeight(100)
         self.home_top_space.show()
         self.home_bottom_space.show()
         self.home_page.layout().setContentsMargins(0, 0, 0, 0)
-        self.plus_button.setToolTip("手动添加英文词条")
-        self.plus_button.setAccessibleName("手动添加英文词条")
+        self.plus_button.setToolTip("Add an English entry")
+        self.plus_button.setAccessibleName("Add an English entry")
         self.pages.setCurrentWidget(self.home_page)
         self._close_menu()
+        self.setMinimumSize(800, 225)
+        if not self.isMaximized():
+            self.resize(800, 232)
         self.topic_input.setFocus()
+
+    def _show_research_window(self) -> None:
+        self.setMinimumSize(800, 490)
+        if not self.isMaximized() and self.height() < 650:
+            self.resize(900, 690)
 
     def _new_entry(self) -> None:
         self.target_entry_id = None
@@ -551,78 +553,74 @@ class MainWindow(QMainWindow):
     def _explore(self) -> None:
         text = self.topic_input.toPlainText().strip()
         if not text:
-            self._show_error("先写下一个主题，或者点击麦克风说出来。")
+            self._show_error("Enter a topic or use the microphone first.")
             return
         self.explore_button.setEnabled(False)
         existing = self.store.get_entry(self.target_entry_id) if self.target_entry_id else None
         exclude_text = existing.body_html if existing else ""
-        if self.chatgpt is not None and not self.signin_declined:
-            try:
-                connected = self.chatgpt.is_signed_in()
-            except SIWCError as exc:
-                connected = False
-                self.chatgpt_error = str(exc)
-            if not connected and not self.chatgpt_error:
-                choice = QMessageBox(self)
-                choice.setWindowTitle("连接 ChatGPT")
-                choice.setText("使用你的 ChatGPT 账号查找更广泛的英文资料？")
-                choice.setInformativeText(
-                    "授权在浏览器完成。搜索词和已有英文内容会发送给 ChatGPT；词典仍保存在本机。"
-                )
-                connect = choice.addButton("连接 ChatGPT", QMessageBox.ButtonRole.AcceptRole)
-                choice.addButton("先用公开资料", QMessageBox.ButtonRole.RejectRole)
-                choice.exec()
-                if choice.clickedButton() is connect:
-                    self.pending_search = (text, exclude_text)
-                    self._begin_sign_in()
-                    return
-                self.signin_declined = True
+        if not is_https_url(text):
+            self._open_google(text)
         self._start_lookup(text, exclude_text)
 
+    def _open_google(self, text: str) -> None:
+        QDesktopServices.openUrl(QUrl("https://www.google.com/search?q=" + quote(text[:350], safe="")))
+
     def _show_search_options(self, point) -> None:
-        if self.chatgpt is None:
-            self._set_status(self.chatgpt_error or "此设备无法连接 ChatGPT。")
-            return
         menu = QMenu(self)
-        login = menu.addAction("连接或更换 ChatGPT 账号")
-        try:
-            signed_in = self.chatgpt.is_signed_in()
-        except SIWCError:
-            signed_in = False
-        sign_out = menu.addAction("退出 ChatGPT 登录") if signed_in else None
+        google = menu.addAction("Search on Google")
+        contents = menu.addAction("Contents  ·  Ctrl+B")
+        ai = menu.addAction("ChatGPT research · optional") if self.chatgpt is not None else None
         chosen = menu.exec(self.explore_button.mapToGlobal(point))
-        if chosen is login:
-            self.pending_search = None
+        if chosen is google:
+            self._open_google(self.topic_input.toPlainText().strip())
+        elif chosen is contents:
+            self._toggle_menu()
+        elif chosen is ai:
+            self._start_optional_ai()
+
+    def _start_optional_ai(self) -> None:
+        text = self.topic_input.toPlainText().strip()
+        if not text:
+            self._show_error("Enter a topic first.")
+            return
+        if self.chatgpt is None:
+            self._set_status(self.chatgpt_error or "ChatGPT is unavailable on this device.")
+            return
+        existing = self.store.get_entry(self.target_entry_id) if self.target_entry_id else None
+        exclude_text = existing.body_html if existing else ""
+        try:
+            connected = self.chatgpt.is_signed_in()
+        except SIWCError as exc:
+            self._set_status(str(exc))
+            return
+        if connected:
+            self._start_lookup(text, exclude_text, prefer_ai=True)
+        else:
+            self.pending_search = (text, exclude_text)
             self._begin_sign_in()
-        elif chosen is sign_out:
-            self._run_job(self.chatgpt.sign_out,
-                          lambda _result: self._set_status("已退出 ChatGPT 登录。"),
-                          self._set_status)
 
     def _begin_sign_in(self) -> None:
         if self.chatgpt is None:
             self.explore_button.setEnabled(True)
-            self._set_status(self.chatgpt_error or "无法连接 ChatGPT。")
+            self._set_status(self.chatgpt_error or "Could not connect to ChatGPT.")
             return
         self.explore_button.setEnabled(False)
-        self._set_status("请在浏览器完成 ChatGPT 登录；完成后会自动返回搜索。")
+        self._set_status("Finish signing in with ChatGPT in your browser. Search will resume automatically.")
         self._run_job(self.chatgpt.sign_in, self._signed_in, self._sign_in_failed)
 
     def _signed_in(self, _profile: object) -> None:
         self.chatgpt_error = ""
-        self.signin_declined = False
         pending = self.pending_search
         self.pending_search = None
         if pending:
-            self._start_lookup(*pending)
+            self._start_lookup(*pending, prefer_ai=True)
         else:
             self.explore_button.setEnabled(True)
-            self._set_status("ChatGPT 已连接。输入主题后点击搜索。")
+            self._set_status("ChatGPT connected. Enter a topic to search.")
 
     def _sign_in_failed(self, message: str) -> None:
         pending = self.pending_search
         self.pending_search = None
-        self.signin_declined = True
         if pending:
             self._start_lookup(*pending, fallback_reason=message)
         else:
@@ -630,13 +628,15 @@ class MainWindow(QMainWindow):
             self._set_status(message)
 
     def _start_lookup(self, text: str, exclude_text: str,
-                      *, fallback_reason: str = "") -> None:
+                      *, fallback_reason: str = "", prefer_ai: bool = False) -> None:
         self.explore_button.setEnabled(False)
-        self._set_status("正在查找英文资料与相关图片…")
+        self._set_status("Searching English sources and images…")
 
         def lookup() -> tuple[ResearchResult, str, str]:
+            if is_https_url(text):
+                return research_webpage(text), "Web page", ""
             ai_error = fallback_reason
-            if self.chatgpt is not None and not self.signin_declined:
+            if prefer_ai and self.chatgpt is not None:
                 try:
                     token = self.chatgpt.access_token()
                     answer = research_topic_ai(token, text, exclude_text=exclude_text)
@@ -652,17 +652,17 @@ class MainWindow(QMainWindow):
 
     def _lookup_ready(self, payload: object) -> None:
         if not isinstance(payload, tuple) or len(payload) != 3:
-            self._research_failed("检索结果格式不正确。")
+            self._research_failed("Unexpected search result format.")
             return
         result, provider, ai_error = payload
         if isinstance(result, ResearchResult) and not result.suggestions and ai_error:
-            result.error = f"ChatGPT：{ai_error}\n公开资料：{result.error or '未找到合适内容。'}"
+            result.error = f"ChatGPT: {ai_error}\nPublic sources: {result.error or 'No suitable result found.'}"
         self._research_ready(result)
         if isinstance(result, ResearchResult) and result.suggestions:
             if ai_error:
-                self._set_status(f"ChatGPT 暂不可用（{ai_error}）；已显示 Wikimedia 资料。用选择笔划过要保存的文字。")
+                self._set_status(f"ChatGPT unavailable ({ai_error}). Showing Wikimedia results; use the selection pen to choose what to save.")
             elif provider == "ChatGPT":
-                self._set_status("已找到带来源的联网资料。用选择笔划过要保存的文字。")
+                self._set_status("Found sourced results. Drag the selection pen over what you want to save.")
 
     def _add_current(self) -> None:
         if self.result is not None and not self.research_scroll.isHidden():
@@ -672,20 +672,20 @@ class MainWindow(QMainWindow):
 
     def _research_failed(self, message: str) -> None:
         self.explore_button.setEnabled(True)
-        self._show_error(f"暂时无法检索：{message}\n请检查网络后重试，或换一个更具体的词。")
+        self._show_error(f"Search failed: {message}\nCheck your connection or try a more specific topic.")
 
     def _research_ready(self, result: object) -> None:
         self.explore_button.setEnabled(True)
         self.result = result  # type: ignore[assignment]
         if not isinstance(self.result, ResearchResult):
-            self._show_error("检索结果格式不正确。")
+            self._show_error("Unexpected search result format.")
             return
         if not self.result.suggestions:
-            self._show_error((self.result.error or "没有找到合适的英文资料。") +
-                             "\n可换一个更具体的主题，或点击加号手动写英文词条。")
+            self._show_error((self.result.error or "No relevant English sources found.") +
+                             "\nTry a more specific topic, or use + to write an entry.")
             return
         self._draw_results()
-        self._set_status("用选择笔划过想保存的英文；黄笔和红笔可标注重点。完成后点击加号。")
+        self._set_status("Drag the selection pen across text to save it. Use yellow or red to mark key points, then click +.")
 
     def _draw_results(self) -> None:
         assert self.result is not None
@@ -697,9 +697,9 @@ class MainWindow(QMainWindow):
         heading = label(self.result.title, "pageTitle")
         header.addWidget(heading, 1)
         for mode, color, tip in (
-            ("select", "#387765", "选择笔：划过英文，保存这部分"),
-            ("yellow", "#b58b2e", "荧光笔：标出重点"),
-            ("red", "#b12c35", "红笔：强调或加注"),
+            ("select", "#387765", "Selection pen: drag over text to save"),
+            ("yellow", "#b58b2e", "Highlighter: mark key points"),
+            ("red", "#b12c35", "Red pen: emphasize or annotate"),
         ):
             button = QToolButton()
             button.setObjectName("resultPen")
@@ -718,7 +718,7 @@ class MainWindow(QMainWindow):
         if self.result.source_url:
             source = label(
                 f'<a href="{escape(self.result.source_url, quote=True)}" '
-                'style="color:#66736f;text-decoration:none;">资料来源 ↗</a>', "muted")
+                'style="color:#66736f;text-decoration:none;">Source ↗</a>', "muted")
             source.setOpenExternalLinks(True)
             self.research_layout.addWidget(source)
         classification = QHBoxLayout()
@@ -736,14 +736,14 @@ class MainWindow(QMainWindow):
         note_card.setObjectName("card")
         note_layout = QVBoxLayout(note_card)
         note_layout.setContentsMargins(15, 12, 15, 12)
-        note_layout.addWidget(label("我的笔记", "eyebrow"))
+        note_layout.addWidget(label("My notes", "eyebrow"))
         self.english_note_input = QPlainTextEdit()
         self.english_note_input.setPlaceholderText("Write your own note in English…")
         self.english_note_input.setFixedHeight(60)
         note_layout.addWidget(self.english_note_input)
         self.research_layout.addWidget(note_card)
 
-        self.research_layout.addWidget(label("相关英文内容", "eyebrow"))
+        self.research_layout.addWidget(label("Related English content", "eyebrow"))
         for suggestion in self.result.suggestions:
             card = QFrame()
             card.setObjectName("suggestion")
@@ -756,7 +756,7 @@ class MainWindow(QMainWindow):
             if suggestion.source_url and suggestion.source_url != self.result.source_url:
                 citation = label(
                     f'<a href="{escape(suggestion.source_url, quote=True)}" '
-                    'style="color:#66736f;text-decoration:none;">来源 ↗</a>', "muted")
+                    'style="color:#66736f;text-decoration:none;">Source ↗</a>', "muted")
                 citation.setOpenExternalLinks(True)
                 fact_header.addWidget(citation)
             card_layout.addLayout(fact_header)
@@ -769,7 +769,7 @@ class MainWindow(QMainWindow):
             self.research_layout.addWidget(card)
 
         if self.result.images:
-            self.research_layout.addWidget(label("相关图片", "eyebrow"))
+            self.research_layout.addWidget(label("Related images", "eyebrow"))
             image_row = QHBoxLayout()
             image_row.setSpacing(10)
             for candidate in self.result.images:
@@ -781,15 +781,17 @@ class MainWindow(QMainWindow):
             image_row.addStretch()
             self.research_layout.addLayout(image_row)
         else:
-            self.research_layout.addWidget(label("没有找到可靠的相关图片；本篇可以只保存文字。", "muted"))
+            self.research_layout.addWidget(label("No suitable images found. You can save the text alone.", "muted"))
         self.research_layout.addStretch()
-        self.input_shell.setFixedHeight(118)
+        self.input_shell.setFixedHeight(176)
+        self.topic_input.setFixedHeight(100)
         self.home_top_space.hide()
         self.home_bottom_space.hide()
         self.home_page.layout().setContentsMargins(0, 14, 0, 0)
         self.research_scroll.show()
-        self.plus_button.setToolTip("把选中的内容加入字典")
-        self.plus_button.setAccessibleName("把选中的内容加入字典")
+        self._show_research_window()
+        self.plus_button.setToolTip("Save selected content")
+        self.plus_button.setAccessibleName("Save selected content")
         self._update_selection_count()
 
     def _choose_pen(self, mode: str) -> None:
@@ -801,11 +803,11 @@ class MainWindow(QMainWindow):
 
     def _update_selection_count(self) -> None:
         facts = sum(len(fact.selected_segments()) for fact, _ in self.fact_widgets)
-        self.plus_button.setToolTip(f"保存选择笔划过的 {facts} 处内容")
+        self.plus_button.setToolTip(f"Save {facts} selected passage{'s' if facts != 1 else ''}")
 
     def _load_thumb(self, choice: ImageChoice) -> None:
         if not choice.candidate.thumb_url:
-            choice.preview.setText("无预览")
+            choice.preview.setText("No preview")
             return
         request = QNetworkRequest(QUrl(choice.candidate.thumb_url))
         request.setRawHeader(b"User-Agent", b"LittleAtlas/0.1 (educational personal dictionary)")
@@ -815,7 +817,7 @@ class MainWindow(QMainWindow):
             if reply.error() == reply.NetworkError.NoError:
                 choice.set_image(bytes(reply.readAll()))
             else:
-                choice.preview.setText("无法预览")
+                choice.preview.setText("Preview unavailable")
             reply.deleteLater()
 
         reply.finished.connect(finished)
@@ -828,7 +830,7 @@ class MainWindow(QMainWindow):
                     for plain, marked_html in fact.selected_segments()]
         own_note = self.english_note_input.toPlainText().strip()
         if not selected and not own_note:
-            self._show_error("请用选择笔划过要保存的英文，或写下自己的英文笔记。")
+            self._show_error("Use the selection pen to choose English text, or write your own note in English.")
             return
         body = ""
         if own_note:
@@ -870,7 +872,7 @@ class MainWindow(QMainWindow):
         self._refresh_catalog()
         self._open_entry(saved.id)
         if candidates:
-            self._set_status("词条已保存，正在把所选图片存到你的电脑…")
+            self._set_status("Entry saved. Saving selected images to your computer…")
 
             def save_images() -> int:
                 count = 0
@@ -887,7 +889,7 @@ class MainWindow(QMainWindow):
 
             self._run_job(save_images, lambda count: self._images_saved(saved.id, int(count)))
         else:
-            self._set_status("词条已保存。选中正文后可用荧光笔或红笔标注。")
+            self._set_status("Entry saved. Select article text to highlight it or mark it in red.")
 
     @staticmethod
     def _append_html(existing_html: str, addition_html: str) -> str:
@@ -902,10 +904,10 @@ class MainWindow(QMainWindow):
     def _manual_entry(self) -> None:
         """Keep the daily writing loop usable when a topic has no encyclopedia page."""
         dialog = QDialog(self)
-        dialog.setWindowTitle("手动写英文词条")
+        dialog.setWindowTitle("Write an English entry")
         dialog.setMinimumWidth(540)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(label("把你确认的英文内容写下来；稍后仍可继续查找补充资料。", "muted", True))
+        layout.addWidget(label("Write down the English content you have checked. You can add more sources later.", "muted", True))
         form = QFormLayout()
         title_input = QLineEdit()
         original = self.topic_input.toPlainText().strip()
@@ -928,7 +930,7 @@ class MainWindow(QMainWindow):
 
         def validate_and_accept() -> None:
             if not title_input.text().strip() or not body_input.toPlainText().strip():
-                QMessageBox.information(dialog, "还差一点", "请填写英文标题和英文内容。")
+                QMessageBox.information(dialog, "Missing information", "Add an English title and content.")
                 return
             dialog.accept()
 
@@ -954,12 +956,13 @@ class MainWindow(QMainWindow):
         self.target_entry_id = None
         self._refresh_catalog()
         self._open_entry(saved.id)
-        self._set_status("你的英文词条已保存在本机。")
+        self._set_status("Your English entry is saved on this computer.")
 
     def _images_saved(self, entry_id: int, count: int) -> None:
         if self.current_entry and self.current_entry.id == entry_id:
             self._draw_saved_images(entry_id)
-        self._set_status(f"已保存 {count} 张图片到本机。" if count else "文字已保存；图片下载未成功，可稍后重试。")
+        self._set_status(f"Saved {count} image{'s' if count != 1 else ''} to your computer." if count else
+                         "Text saved, but the images could not be downloaded. Try again later.")
 
     def _refresh_catalog(self) -> None:
         entries = self.store.list_entries()
@@ -1002,12 +1005,13 @@ class MainWindow(QMainWindow):
 
     def _show_chapter(self, category: str, subcategory: str | None = None) -> None:
         self._save_reader()
+        self._show_research_window()
         self.chapter_title.setText(subcategory or category)
         entries = self.store.list_entries(category=category, subcategory=subcategory)
         self.chapter_subtitle.setText(f"{category} · {len(entries)} entries")
         clear_layout(self.chapter_items)
         if not entries:
-            self.chapter_items.addWidget(label("这一章还没有内容。今天学到的新知识可以从这里开始。", "muted"))
+            self.chapter_items.addWidget(label("No entries in this chapter yet.", "muted"))
         for entry in entries:
             button = QPushButton(f"{entry.title}     ↗")
             button.setMinimumHeight(52)
@@ -1028,19 +1032,20 @@ class MainWindow(QMainWindow):
             self._show_home()
             return
         self.current_entry = entry
+        self._show_research_window()
         self._loading_reader = True
         self.save_timer.stop()
         self.reader_title.setText(entry.title)
         self.reader_category.setCurrentText(entry.category or "Unsorted")
         self.reader_subcategory.setText(entry.subcategory)
         self.article_editor.setHtml(entry.body_html)
-        self.original_note.setText("最初输入（仅本机保留）：" + entry.original_input)
+        self.original_note.setText("Original input (stored on this device): " + entry.original_input)
         self.original_note.hide()
         self._loading_reader = False
         self.source_button.setEnabled(bool(entry.source_url))
         self._draw_saved_images(entry_id)
         self.pages.setCurrentWidget(self.reader_page)
-        self._set_status("正文可编辑；选中文字后使用荧光笔或红笔，修改会自动保存。")
+        self._set_status("Edit the article or select text to mark it. Changes save automatically.")
 
     def _draw_saved_images(self, entry_id: int) -> None:
         clear_layout(self.image_layout)
@@ -1060,7 +1065,7 @@ class MainWindow(QMainWindow):
                 picture.setPixmap(pixmap.scaled(158, 91, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation))
             else:
-                picture.setText("图片文件缺失")
+                picture.setText("Image file missing")
             column.addWidget(picture)
             caption = QPushButton((record.caption or "Image")[:25] + " ↗")
             caption.setToolTip(f"{record.attribution}\n{record.license}\n{record.source_url}")
@@ -1084,7 +1089,7 @@ class MainWindow(QMainWindow):
         self.save_timer.stop()
         title = self.reader_title.text().strip()
         if not title:
-            self._set_status("标题不能为空；请填写英文标题。")
+            self._set_status("Enter an English title.")
             return
         entry = replace(self.current_entry, title=title,
                         category=self.reader_category.currentText(),
@@ -1093,12 +1098,12 @@ class MainWindow(QMainWindow):
         if entry != self.current_entry:
             self.current_entry = self.store.upsert_entry(entry)
             self._refresh_catalog()
-            self._set_status("已自动保存。")
+            self._set_status("Saved automatically.")
 
     def _mark_text(self, kind: str) -> None:
         cursor = self.article_editor.textCursor()
         if not cursor.hasSelection():
-            self._set_status("先在正文里拖动选中一段文字，再点击笔。")
+            self._set_status("Select text in the article, then choose a pen.")
             return
         fmt = QTextCharFormat()
         if kind == "yellow":
@@ -1131,7 +1136,7 @@ class MainWindow(QMainWindow):
     def _delete_entry(self) -> None:
         if not self.current_entry:
             return
-        answer = QMessageBox.question(self, "删除词条", f"确定删除“{self.current_entry.title}”吗？",
+        answer = QMessageBox.question(self, "Delete entry", f"Delete “{self.current_entry.title}”?",
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -1152,7 +1157,7 @@ class MainWindow(QMainWindow):
         self.current_entry = None
         self._refresh_catalog()
         self._show_home()
-        self._set_status("词条已删除。")
+        self._set_status("Entry deleted.")
 
     def _toggle_voice(self) -> None:
         if self.voice_recorder is None:
@@ -1161,7 +1166,7 @@ class MainWindow(QMainWindow):
         recorder = self.voice_recorder
         self.voice_recorder = None
         self.mic_button.setEnabled(False)
-        self.mic_button.setToolTip("正在识别语音…")
+        self.mic_button.setToolTip("Transcribing…")
         self._run_job(recorder.stop_and_transcribe, self._voice_ready, self._voice_failed)
 
     def _start_voice(self, language: str) -> None:
@@ -1177,19 +1182,19 @@ class MainWindow(QMainWindow):
             self.voice_recorder.start()
         except Exception as exc:
             self.voice_recorder = None
-            self._show_error(f"无法开始录音：{exc}")
+            self._show_error(f"Could not start recording: {exc}")
             return
         self.mic_button.setIcon(icon("stop", "#b94646"))
-        self.mic_button.setToolTip("停止录音并转文字")
-        self.mic_button.setAccessibleName("停止录音并转文字")
+        self.mic_button.setToolTip("Stop and transcribe")
+        self.mic_button.setAccessibleName("Stop and transcribe")
         self.mic_button.setProperty("recording", True)
         self.mic_button.style().unpolish(self.mic_button)
         self.mic_button.style().polish(self.mic_button)
-        self._set_status("正在录音。再次点击麦克风后会转成可编辑文字。")
+        self._set_status("Recording. Click the microphone again to transcribe your speech.")
 
     def _show_voice_level(self, amount: float) -> None:
         if self.voice_recorder is not None and amount > 0.04:
-            self._set_status("正在听你说话…")
+            self._set_status("Listening…")
 
     def _voice_ready(self, transcript: object) -> None:
         self._reset_mic_button()
@@ -1199,19 +1204,19 @@ class MainWindow(QMainWindow):
             else:
                 self.topic_input.setPlainText(str(transcript))
             self.topic_input.setFocus()
-            self._set_status("语音已转成文字。核对后点击搜索键。")
+            self._set_status("Transcript ready. Check it, then search.")
         else:
-            self._set_status("没有听清内容，请再试一次。")
+            self._set_status("Could not hear speech. Try again.")
 
     def _voice_failed(self, message: str) -> None:
         self._reset_mic_button()
-        self._show_error(f"语音识别失败：{message}")
+        self._show_error(f"Transcription failed: {message}")
 
     def _reset_mic_button(self) -> None:
         self.mic_button.setEnabled(True)
         self.mic_button.setIcon(icon("mic"))
-        self.mic_button.setToolTip("录音：点击选择中文或 English")
-        self.mic_button.setAccessibleName("录音")
+        self.mic_button.setToolTip("Dictate in Chinese or English")
+        self.mic_button.setAccessibleName("Dictate")
         self.mic_button.setProperty("recording", False)
         self.mic_button.style().unpolish(self.mic_button)
         self.mic_button.style().polish(self.mic_button)

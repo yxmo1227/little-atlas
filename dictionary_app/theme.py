@@ -4,8 +4,7 @@ STYLE = """
 QWidget { color: #252b2b; font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI'; font-size: 13px; }
 QWidget#appCanvas { background: #f5f5f7; }
 QFrame#sidebar { background: #ffffff; border-left: 1px solid #e7e8e9; }
-QFrame#inputShell { background: #ffffff; border: 1px solid #e5e7e6; border-radius: 23px; }
-QFrame#searchBar { background: #f8f9f8; border: 1px solid #edf0ed; border-radius: 19px; }
+QFrame#inputShell { background: #ffffff; border: 1px solid #e1e4e3; border-radius: 23px; }
 QFrame#card, QFrame#suggestion, QFrame#imageCard {
     background: #ffffff; border: 1px solid #e5e8e6; border-radius: 14px;
 }
@@ -23,8 +22,8 @@ QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {
 }
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus { border: 1px solid #8ba79a; }
 QPlainTextEdit#topicInput {
-    border: 0; background: transparent; padding: 2px 3px; color: #26302e;
-    font-size: 15px; selection-background-color: #d3e3d9;
+    border: 0; background: transparent; padding: 7px 6px; color: #26302e;
+    font-size: 17px; selection-background-color: #d3e3d9;
 }
 QLineEdit#readerTitle { border: 0; background: transparent; padding: 3px 0;
     font-size: 29px; font-weight: 650; color: #222b29; }

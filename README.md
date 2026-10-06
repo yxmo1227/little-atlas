@@ -5,21 +5,24 @@ Little Atlas 是一款 Windows 本地桌面软件。输入今天学到的中文�
 ## 使用
 
 1. 解压完整的 `LittleAtlas-Windows.zip`，双击 `LittleAtlas.exe`。不要单独移走 EXE；它需要旁边的 `_internal` 文件夹。
-2. 在中央输入卡片中输入中文或英文，按 Enter 或点击搜索键。Shift + Enter 换行。首次使用时可在浏览器中授权自己的 ChatGPT 账号；未连接时仍可使用 Wikimedia 的公开资料。
-3. 搜索结果标题旁有三支笔：**选择笔**拖过的英文才会进入字典；**黄色荧光笔**和**红笔**用来标注重点，不会单独添加内容。按 Ctrl + Z 撤销上一笔。核对资料来源、章节和图片后，点击输入卡片里的 **＋** 保存。没有搜索结果时，＋可手动新建英文词条。
-4. 麦克风可选择中文或 English 录音。再次点击后转成可编辑文字，检查无误再搜索。右上角目录键打开已收藏词条；正文可继续编辑、标注和自动保存。
+2. 在唯一的输入框中写中文或英文，按 Enter 或点击搜索键。软件会在默认浏览器打开 Google 搜索（默认浏览器是 Chrome 时便在 Chrome 打开），同时用 Wikimedia 公共资料在软件里提供带来源的英文建议。**默认搜索不调用 ChatGPT，不消耗模型用量。** Shift + Enter 换行。
+3. 如果 Google 找到了更合适的英文文章，打开那篇文章，把文章自己的 HTTPS 链接粘贴进输入框并搜索。软件会抽取可选取的英文原文，保留文章链接作为来源。Google 搜索结果页本身不会自动回传到软件。
+4. 搜索结果标题旁有三支笔：**选择笔**拖过的英文才会进入字典；**黄色荧光笔**和**红笔**用来标注重点，不会单独添加内容。按 Ctrl + Z 撤销上一笔。核对资料来源、章节和图片后，点击输入框里的 **＋** 保存。没有搜索结果时，＋可手动新建英文词条。
+5. 麦克风可选择中文或 English 录音。再次点击后转成可编辑文字，检查无误再搜索。按 **Ctrl + B**，或右键点击搜索键并选 **Contents**，打开已收藏的章节与词条。正文可继续编辑、标注和自动保存。
 
-首页采用单一的简洁界面，没有每日画风、装饰背景或空白词条例子。菜单只显示目录。右键点击搜索键可连接、更换或退出 ChatGPT 账号。
+首页只有一个较大的输入框，没有额外的大边框、目录按钮、每日画风或装饰背景。软件界面的按钮和提示使用英文，仍支持中文主题和中文语音。
 
 ## 联网研究与隐私
 
-Little Atlas 使用 [Sign in with ChatGPT](https://developers.openai.com/siwc/quickstart) 让符合资格的用户以自己的 ChatGPT 账号授权；软件不会读取 Codex Desktop 的登录文件，也不包含共享 API 密钥。登录令牌保存在当前 Windows 用户的凭据管理器中。首次授权会打开系统浏览器，之后返回桌面软件。[官方登录说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+默认搜索会把搜索词交给 Google 搜索页面，以及 Wikipedia/Wikidata/Wikimedia Commons 的公开接口；无需 ChatGPT 登录或 API key。直接输入一篇文章的 HTTPS 链接时，软件会读取该公开网页的英文内容。它不会自动抓取 Google 的搜索结果列表：Google 的 [Custom Search JSON API](https://developers.google.com/custom-search/v1/overview)对新用户已关闭，普通浏览器打开搜索页也不会把结果传回桌面程序。
 
-连接后，当前搜索词和已有的少量英文内容会发送给 ChatGPT，用于避免重复并通过联网搜索找资料。软件只展示带可点击来源的英文建议；账号或网页搜索不可用时，回退到 Wikipedia、Wikidata 和 Wikimedia Commons。联网内容可能出错，请核对来源后再划入字典。网页搜索功能取决于账号和模型的可用权限。[官方联网搜索说明](https://developers.openai.com/api/docs/guides/tools-web-search)、[账号功能限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+可选的 **ChatGPT research** 只会在你右键点击搜索键、明确选择它后运行。此功能用 [Sign in with ChatGPT](https://developers.openai.com/siwc/quickstart) 授权自己的账号；软件不会读取 Codex Desktop 的登录文件，也不包含共享 API 密钥。令牌保存在 Windows 凭据管理器中。选择该功能时，当前搜索词和已有的少量英文内容会发送给 ChatGPT；不可用时回退到 Wikimedia。[官方登录说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+
+联网内容可能出错，请核对可点击来源后再划入字典。文章导入只接受公开 HTTPS 页面，不尝试绕过付费墙或需要登录的网站。
 
 录音在本机用 Vosk 转写，不上传到 ChatGPT。首次选择中文或英文录音时，会下载约 40–42 MB 的相应离线模型。图片来自 Wikimedia Commons；只在你选择后下载到本机，词条保存图片来源、作者及许可信息。
 
-词条、图片、账号元数据和语音模型位于 `%LOCALAPPDATA%\PersonalDictionary\`，不随公开代码或安装包共享。数据库是 `dictionary.sqlite3`，图片在 `images\`，语音模型在 `models\`。要备份，关闭软件后复制这个文件夹。个人账号令牌由 Windows 凭据管理器保存，不在该文件夹中。
+词条、图片、可选账号元数据和语音模型位于 `%LOCALAPPDATA%\PersonalDictionary\`，不随公开代码或安装包共享。数据库是 `dictionary.sqlite3`，图片在 `images\`，语音模型在 `models\`。要备份，关闭软件后复制这个文件夹。可选的 ChatGPT 账号令牌由 Windows 凭据管理器保存，不在该文件夹中。
 
 ## 从源码运行或打包
 
@@ -39,11 +42,11 @@ py -m venv .venv
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-界面使用 PySide6，个人词条使用 SQLite。账号授权和网页搜索的自动测试使用模拟响应；真实 ChatGPT 登录需要每位用户在首次使用时自行授权。
+界面使用 PySide6，个人词条使用 SQLite。账号授权和网页搜索的自动测试使用模拟响应；只有主动使用可选 ChatGPT 功能时才需要账号授权。
 
 ## English summary
 
-Little Atlas is a local Windows personal dictionary. Search a topic in Chinese or English, review cited English facts, paint exact phrases into your own entry, annotate them, and organize entries by chapter. Each install starts empty. ChatGPT sign-in is optional for broader web research; Wikimedia remains available as a fallback. Personal data is stored under the current user's local app-data folder.
+Little Atlas is a local Windows personal dictionary. Search a topic in Chinese or English, review cited English facts, paint exact phrases into your own entry, annotate them, and organize entries by chapter. Each install starts empty. Default research opens Google in the browser and uses public Wikimedia sources in the app, with no ChatGPT usage. Paste an English article's HTTPS URL to import excerpts. ChatGPT research remains an explicit optional action. Personal data is stored under the current user's local app-data folder.
 
 ## License
 

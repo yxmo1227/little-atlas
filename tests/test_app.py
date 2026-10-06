@@ -125,7 +125,7 @@ class AppJourneyTests(unittest.TestCase):
         with patch.object(self.window, "_run_job", side_effect=complete), \
              patch("dictionary_app.app.research_topic_ai", return_value=ai) as search_ai, \
              patch("dictionary_app.app.research_topic", return_value=wiki) as search_wiki:
-            self.window._start_lookup("生理盐水", "")
+            self.window._start_lookup("生理盐水", "", prefer_ai=True)
             self.assertEqual(self.window.result.title, "Saline")
             self.assertEqual(search_ai.call_args.args[:2], ("test-token", "生理盐水"))
             search_wiki.assert_not_called()
@@ -134,7 +134,7 @@ class AppJourneyTests(unittest.TestCase):
         with patch.object(self.window, "_run_job", side_effect=complete), \
              patch("dictionary_app.app.research_topic_ai", return_value=unavailable), \
              patch("dictionary_app.app.research_topic", return_value=wiki) as search_wiki:
-            self.window._start_lookup("生理盐水", "")
+            self.window._start_lookup("生理盐水", "", prefer_ai=True)
             self.assertEqual(self.window.result.title, "Saline (medicine)")
             self.assertIn("Wikimedia", self.window.status.text())
             search_wiki.assert_called_once()
@@ -142,16 +142,56 @@ class AppJourneyTests(unittest.TestCase):
     def test_home_is_compact_and_catalog_opens_only_on_demand(self) -> None:
         self.assertTrue(self.window.sidebar.isHidden())
         self.assertGreaterEqual(self.window.input_shell.width(), 720)
-        self.assertLessEqual(self.window.input_shell.height(), 160)
-        self.assertLessEqual(self.window.width(), 1100)
+        self.assertGreaterEqual(self.window.topic_input.height(), 100)
+        self.assertLessEqual(self.window.height(), 260)
+        self.assertLessEqual(self.window.width(), 800)
         self.assertEqual(self.window.mic_button.text(), "")
         self.assertEqual(self.window.explore_button.text(), "")
         self.assertEqual(self.window.plus_button.text(), "")
         self.assertFalse(hasattr(self.window, "style_select"))
-        self.window.menu_button.click()
+        self.assertFalse(hasattr(self.window, "menu_button"))
+        self.window._toggle_menu()
         self.assertFalse(self.window.sidebar.isHidden())
+        self.assertEqual(self.window.sidebar.layout().itemAt(0).layout().itemAt(0).widget().text(), "Contents")
         self.window._close_menu()
         self.assertTrue(self.window.sidebar.isHidden())
+
+    def test_default_search_opens_google_and_uses_no_chatgpt_tokens(self) -> None:
+        source = "https://en.wikipedia.org/wiki/Erebus"
+        free = ResearchResult("Erebus", "Myths & Beliefs", "Greek Mythology", source,
+                              [Suggestion("Overview", "Erebus is a Greek deity.", source)])
+        self.window.topic_input.setPlainText("厄瑞波斯")
+
+        def complete(action, on_result, _on_error=None):
+            on_result(action())
+
+        with patch.object(self.window, "_run_job", side_effect=complete), \
+             patch("dictionary_app.app.QDesktopServices.openUrl", return_value=True) as browser, \
+             patch("dictionary_app.app.research_topic", return_value=free) as public_search, \
+             patch("dictionary_app.app.research_topic_ai") as paid_search:
+            self.window._explore()
+            self.assertEqual(self.window.result.title, "Erebus")
+            self.assertGreaterEqual(self.window.height(), 650)
+            self.assertIn("google.com/search", browser.call_args.args[0].toString())
+            public_search.assert_called_once()
+            paid_search.assert_not_called()
+
+    def test_https_article_import_skips_google(self) -> None:
+        url = "https://example.org/article"
+        page = ResearchResult("Article", "Unsorted", "General", url,
+                              [Suggestion("Paragraph", "An English article fact.", url)])
+        self.window.topic_input.setPlainText(url)
+
+        def complete(action, on_result, _on_error=None):
+            on_result(action())
+
+        with patch.object(self.window, "_run_job", side_effect=complete), \
+             patch("dictionary_app.app.QDesktopServices.openUrl") as browser, \
+             patch("dictionary_app.app.research_webpage", return_value=page) as import_page:
+            self.window._explore()
+            self.assertEqual(self.window.result.title, "Article")
+            browser.assert_not_called()
+            import_page.assert_called_once_with(url)
 
     def test_enter_searches_and_shift_enter_stays_in_the_composer(self) -> None:
         with patch.object(self.window, "_explore") as explore:
