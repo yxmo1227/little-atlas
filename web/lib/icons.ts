@@ -1,0 +1,21 @@
+// Import only the icons this interface uses so the build does not load the whole catalog.
+export { default as ArrowLeft } from 'lucide-react/dist/esm/icons/arrow-left.mjs';
+export { default as ArrowRight } from 'lucide-react/dist/esm/icons/arrow-right.mjs';
+export { default as BookOpen } from 'lucide-react/dist/esm/icons/book-open.mjs';
+export { default as Check } from 'lucide-react/dist/esm/icons/check.mjs';
+export { default as ChevronRight } from 'lucide-react/dist/esm/icons/chevron-right.mjs';
+export { default as ExternalLink } from 'lucide-react/dist/esm/icons/external-link.mjs';
+export { default as Highlighter } from 'lucide-react/dist/esm/icons/highlighter.mjs';
+export { default as ImagePlus } from 'lucide-react/dist/esm/icons/image-plus.mjs';
+export { default as List } from 'lucide-react/dist/esm/icons/list.mjs';
+export { default as LoaderCircle } from 'lucide-react/dist/esm/icons/loader-circle.mjs';
+export { default as LogOut } from 'lucide-react/dist/esm/icons/log-out.mjs';
+export { default as Mic } from 'lucide-react/dist/esm/icons/mic.mjs';
+export { default as MoreHorizontal } from 'lucide-react/dist/esm/icons/ellipsis.mjs';
+export { default as PenLine } from 'lucide-react/dist/esm/icons/pen-line.mjs';
+export { default as Pencil } from 'lucide-react/dist/esm/icons/pencil.mjs';
+export { default as Plus } from 'lucide-react/dist/esm/icons/plus.mjs';
+export { default as Search } from 'lucide-react/dist/esm/icons/search.mjs';
+export { default as ShieldCheck } from 'lucide-react/dist/esm/icons/shield-check.mjs';
+export { default as Trash2 } from 'lucide-react/dist/esm/icons/trash-2.mjs';
+export { default as X } from 'lucide-react/dist/esm/icons/x.mjs';
