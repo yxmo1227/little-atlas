@@ -36,6 +36,7 @@ export type ResearchResult = {
   sourceUrl: string;
   facts: ResearchFact[];
   images: ResearchImage[];
+  candidates?: { title: string; snippet: string; sourceUrl: string }[];
   error?: string;
 };
 
@@ -124,7 +125,10 @@ type WikiPage = {
 };
 type WikiResponse = {
   error?: { info?: string; code?: string };
-  query?: { pages?: WikiPage[]; search?: { title: string }[] };
+  query?: {
+    pages?: WikiPage[]; search?: { title: string; snippet?: string }[];
+    normalized?: { from: string; to: string }[]; converted?: { from: string; to: string }[]; redirects?: { from: string; to: string }[];
+  };
   entities?: Record<string, { sitelinks?: { enwiki?: { title?: string } } }>;
 };
 
@@ -162,31 +166,42 @@ async function getJson(endpoint: string, params: Record<string, string | number>
 
 function normal(text: string): string { return text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, ""); }
 
-function similarity(title: string, phrase: string): number {
-  const a = normal(title), b = normal(phrase);
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  if (b.includes(a)) return 0.96;
-  if (a.includes(b)) return 0.83;
-  // Bounded edit distance handles transliteration differences (e.g. 厄瑞波斯 / 厄瑞玻斯).
-  const x = a.slice(0, 160), y = b.slice(0, 160);
-  let row = Array.from({ length: y.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= x.length; i++) {
+function confidentRedirect(subject: string, title: string): boolean {
+  const words = subject.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => !['the', 'a', 'an'].includes(word)) ?? [];
+  if (words.length <= 1) return true;
+  const titleWords = new Set(title.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+  if (words.every((word) => titleWords.has(word))) return true;
+  // Accept close spelling/plural aliases, but a multiword redirect with another subject
+  // remains a choice: a provider redirect alone can give a broad phrase another meaning.
+  const a = normal(subject).slice(0, 160), b = normal(title).slice(0, 160);
+  let row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
     const next = [i];
-    for (let j = 1; j <= y.length; j++) next[j] = Math.min(next[j - 1] + 1, row[j] + 1, row[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(next[j - 1] + 1, row[j] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
     row = next;
   }
-  return 1 - row[y.length] / Math.max(x.length, y.length);
+  return !!(a && b) && 1 - row[b.length] / Math.max(a.length, b.length) >= 0.8;
+}
+
+function firstResearchSentence(raw: string): string {
+  const line = raw.split(/\r?\n/, 1)[0].trim();
+  const first = new Intl.Segmenter('en', { granularity: 'sentence' }).segment(line)[Symbol.iterator]().next().value?.segment ?? line;
+  return first.trim().replace(/[.!?。！？]+$/, '').trim();
 }
 
 /** Extract a note's subject without sending its whole paragraph to a title search. */
 export function deriveResearchTopic(content: string): string {
   const raw = content.trim().replace(/[\t ]+/g, " ").slice(0, 30_000);
-  const first = raw.split(/[.!?。！？\n]/, 1)[0].trim()
+  let first = firstResearchSentence(raw)
+    .replace(/^(?:(?:请问|请解释|介绍一下|什么是|什么叫|我想(?:了解|知道|学习)(?:一下)?|想(?:了解|知道|学习)(?:一下)?)\s*)+/i, "")
     .replace(/^(?:I (?:learned|read|heard)(?: today)?(?: about| that)?|Today I learned(?: about| that)?|Tell me about|What (?:is|are)|我(?:今天|最近)?(?:学了|学习了|学到了?|了解到?了?|知道了|听说了)?|今天(?:学了|学习了|学到了?|了解到?了?)|关于|请介绍|给我讲讲)\s*/i, "")
     .replace(/^In [^,]{1,60},\s*/i, "")
     .replace(/^(?:在[^，,]{1,30}|[^，,是]{1,20})(?:神话|传说|文化|文学|历史|医学)(?:中|里)[，,]?\s*/, "")
     .trim();
+  const questionSubject = first.match(/^(?:为什么|为何)(.+?)(?:会|有|能|要|是|可以|需要|具有)/)?.[1]
+    || first.match(/^(.+?)(?:如何|怎么)(?:会|能|可以)?/)?.[1]
+    || first.match(/^(?:why|how)\s+(?:do|does|did)\s+(.+?)\s+(?:work|have|has|use|change|camouflage|sleep|hibernate|fly|float|melt|freeze|breathe|form|move|grow|produce|live|eat|survive|function|happen|evolve|need|exist|make|cause)\b/i)?.[1];
+  if (questionSubject?.trim()) first = questionSubject.trim().replace(/^(?:the|a|an)\s+/i, "");
   const subject = first.split(/\s+(?:is|are|was|were|refers to|means|can|has|have)\s+|就是|属于|指的是|是|关于/, 1)[0].trim()
     .replace(/^(?:一个叫|一位叫|一种叫|一个|一位|一种|一只|一条|一颗|一本|个|叫做|名叫)\s*/, "")
     .replace(/^["“‘']|["”’']$/g, "").replace(/[,，;；:：]+$/, "").trim();
@@ -196,23 +211,34 @@ export function deriveResearchTopic(content: string): string {
 }
 
 function searchPhrases(raw: string): string[] {
-  const firstSentence = raw.split(/[.!?。！？\n]/, 1)[0].trim();
+  const firstSentence = firstResearchSentence(raw);
   return [...new Set([deriveResearchTopic(raw), firstSentence, raw].filter(Boolean).map((value) => value.slice(0, 160)))];
 }
 
-async function findTitle(raw: string, endpoint: string): Promise<string> {
-  for (const phrase of searchPhrases(raw)) {
-    const data = await getJson(endpoint, { action: "query", list: "search", srsearch: phrase, srnamespace: 0, srlimit: 12 });
-    const ranked = (data.query?.search ?? []).map((item, index) => ({ title: item.title, score: similarity(item.title, phrase), index }))
-      .sort((a, b) => b.score - a.score || a.index - b.index);
-    if (ranked[0]?.score >= 0.65) return ranked[0].title;
+class RelatedArticlesError extends Error {
+  readonly titles: string[];
+  readonly chinese: boolean;
+  constructor(titles: string[], chinese: boolean) {
+    super("No close article was found. Try the topic's name with a little more context.");
+    this.titles = titles;
+    this.chinese = chinese;
   }
-  throw new Error("No close article was found. Try the topic's name with a little more context.");
 }
 
-async function englishLink(title: string): Promise<string> {
-  const data = await getJson(ZH_API, { action: "query", prop: "langlinks|pageprops", titles: title, redirects: 1, lllang: "en" });
-  const page = data.query?.pages?.[0];
+async function findTitle(raw: string, endpoint: string, exactTitle = false): Promise<string> {
+  for (const phrase of exactTitle ? [raw.trim().slice(0, 200)] : searchPhrases(raw)) {
+    const data = await getJson(endpoint, { action: "query", list: "search", srsearch: phrase, srnamespace: 0, srlimit: 12 });
+    const titles = [...new Set((data.query?.search ?? []).map((item) => item.title).filter((title) => title && title.length <= 200))];
+    // A partial title is a related topic, not proof that it names the requested subject.
+    const exact = titles.find((title) => normal(title) === normal(phrase));
+    if (exact) return exact;
+    if (titles.length) throw new RelatedArticlesError(titles, endpoint === ZH_API);
+  }
+  throw new RelatedArticlesError([], endpoint === ZH_API);
+}
+
+async function englishLink(title: string, existingPage?: WikiPage): Promise<string> {
+  const page = existingPage ?? (await getJson(ZH_API, { action: "query", prop: "langlinks|pageprops", titles: title, redirects: 1, converttitles: 1, lllang: "en" })).query?.pages?.[0];
   const link = page?.langlinks?.find((item) => item.lang === "en" && item.title)?.title;
   if (link) return link;
   const item = page?.pageprops?.wikibase_item;
@@ -222,6 +248,40 @@ async function englishLink(title: string): Promise<string> {
     if (englishTitle) return englishTitle;
   }
   throw new Error("This topic has no linked English article yet. Try its English name.");
+}
+
+function orderedPages(data: WikiResponse, titles: string[]): WikiPage[] {
+  const aliases = new Map([...(data.query?.normalized ?? []), ...(data.query?.converted ?? []), ...(data.query?.redirects ?? [])]
+    .map((item) => [item.from, item.to]));
+  return titles.flatMap((requested) => {
+    let title = requested;
+    for (let attempts = 0; aliases.has(title) && attempts < 6; attempts++) title = aliases.get(title)!;
+    const page = data.query?.pages?.find((item) => normal(item.title ?? "") === normal(title));
+    return page ? [page] : [];
+  });
+}
+
+async function relatedArticles(error: RelatedArticlesError): Promise<NonNullable<ResearchResult['candidates']>> {
+  let titles = error.titles.slice(0, 12);
+  if (!titles.length) return [];
+  if (error.chinese) {
+    const links = await getJson(ZH_API, { action: "query", prop: "langlinks|pageprops", titles: titles.join("|"), redirects: 1, converttitles: 1, lllang: "en", lllimit: "max" });
+    titles = orderedPages(links, titles).filter((page) => !page.missing && !(page.pageprops && 'disambiguation' in page.pageprops))
+      .flatMap((page) => page.langlinks?.find((link) => link.lang === 'en' && link.title)?.title ?? []);
+  }
+  titles = [...new Set(titles)].slice(0, 6);
+  if (!titles.length) return [];
+  const previews = await getJson(EN_API, { action: "query", prop: "extracts|pageterms|pageprops|info", titles: titles.join("|"), redirects: 1,
+    wbptterms: "description", inprop: "url", exintro: 1, explaintext: 1, exchars: 600, exlimit: 6 });
+  const seen = new Set<string>();
+  return orderedPages(previews, titles).flatMap((page) => {
+    if (!page.title || page.missing || (page.pageprops && 'disambiguation' in page.pageprops) || seen.has(page.title)) return [];
+    seen.add(page.title);
+    const englishPreview = [...(page.terms?.description ?? []), ...(page.extract ?? '').split(/[\n]|(?<=[.!?])\s+/)]
+      .map((text) => plainHtml(text).trim()).find((text) => text.length > 12 && !/[\u3400-\u9fff]/.test(text));
+    return [{ title: page.title, snippet: (englishPreview || 'Open this English reference article.').slice(0, 300),
+      sourceUrl: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}` }];
+  });
 }
 
 const MAX_RESEARCH_FACTS = 300;
@@ -300,12 +360,22 @@ async function findImages(title: string, category: string, subcategory: string, 
   return candidates.sort((a, b) => b.score - a.score).slice(0, 3).map(({ image }) => image);
 }
 
-async function resolveTitle(raw: string): Promise<string> {
-  const subject = deriveResearchTopic(raw);
+async function resolveTitle(raw: string, exactTitle = false): Promise<string> {
+  const subject = exactTitle ? raw.trim().slice(0, 200) : deriveResearchTopic(raw);
   // These are ordinary medical synonyms, not inferred claims or model output.
   if (/^(?:normal |physiological )?saline(?: solution)?$/i.test(subject)) return "Saline (medicine)";
   const chinese = /[\u3400-\u9fff]/.test(subject);
-  const title = await findTitle(raw, chinese ? ZH_API : EN_API);
+  // Resolve an actual title and its redirects first. Chinese conversion handles 货币 / 貨幣
+  // without mistaking a longer, partly matching name (such as an arena) for the topic.
+  const directData = await getJson(chinese ? ZH_API : EN_API, { action: "query", prop: chinese ? "langlinks|pageprops" : "pageprops",
+    titles: subject, redirects: 1, converttitles: 1, ...(chinese ? { lllang: 'en' } : {}) });
+  const direct = directData.query?.pages?.[0];
+  const trustedRedirect = chinese || !directData.query?.redirects?.length || confidentRedirect(subject, direct?.title ?? '');
+  if (direct && !direct.missing && direct.title && trustedRedirect) {
+    if (direct.pageprops && 'disambiguation' in direct.pageprops) throw new Error("This name has several meanings. Add a few words to specify the topic.");
+    return chinese ? englishLink(direct.title, direct) : direct.title;
+  }
+  const title = await findTitle(raw, chinese ? ZH_API : EN_API, exactTitle);
   return chinese ? englishLink(title) : title;
 }
 
@@ -338,16 +408,17 @@ export async function researchImages(content: string): Promise<ResearchImage[]> 
 }
 
 /** Fetch English Wikipedia facts and optional freely licensed Commons images. */
-export async function researchTopic(query: string): Promise<ResearchResult> {
+export async function researchTopic(query: string, exactTitle = false): Promise<ResearchResult> {
   if (/^https?:\/\//i.test(query.trim())) return researchUrl(query.trim());
   const raw = query.trim().slice(0, 30_000);
   const empty: ResearchResult = { title: raw, ...inferCategory(raw), sourceUrl: "", facts: [], images: [] };
   if (!raw) return { ...empty, error: "Enter a topic to explore." };
-  const key = raw.toLocaleLowerCase();
+  if (exactTitle && raw.length > 200) return { ...empty, error: 'Choose a topic name of up to 200 characters.' };
+  const key = `research:${exactTitle ? 'title' : 'content'}:${raw.toLocaleLowerCase()}`;
   const cached = cache.get(key);
   if (cached && cached.expires > Date.now()) return structuredClone(cached.result);
   try {
-    let title = await resolveTitle(raw);
+    let title = await resolveTitle(raw, exactTitle);
     let data: WikiResponse;
     const params = { ...ARTICLE_METADATA, prop: `${ARTICLE_METADATA.prop}|extracts`, titles: title, explaintext: 1, exsectionformat: "wiki" };
     try { data = await getJson(EN_API, params); }
@@ -365,6 +436,19 @@ export async function researchTopic(query: string): Promise<ResearchResult> {
     cache.set(key, { expires: Date.now() + CACHE_TTL, result: structuredClone(result) });
     return result;
   } catch (error) {
+    if (error instanceof RelatedArticlesError) {
+      try {
+        const candidates = await relatedArticles(error);
+        if (candidates.length) {
+          const result: ResearchResult = { ...empty, title: 'Search results', candidates };
+          if (cache.size >= 60) cache.delete(cache.keys().next().value as string);
+          cache.set(key, { expires: Date.now() + CACHE_TTL, result: structuredClone(result) });
+          return result;
+        }
+      } catch (previewError) {
+        return { ...empty, error: previewError instanceof Error ? previewError.message : 'Research is unavailable right now. Try again shortly.' };
+      }
+    }
     return { ...empty, error: error instanceof Error ? error.message : "Research is unavailable right now. Try again shortly." };
   }
 }

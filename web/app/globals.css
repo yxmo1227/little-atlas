@@ -207,6 +207,22 @@ mark { color: inherit; background: transparent; box-decoration-break: clone; -we
 .research-pen-row > span { display: flex; align-items: center; gap: 5px; color: #98a5b8; font-size: 9px; }
 .research-target { font-size: 10px; color: #90a0b5; padding-top: 12px; line-height: 1.6; }
 .research-target strong { color: #647c9f; font-weight: 500; }
+.research-candidates { padding-top: 23px; }
+.research-candidates-heading > span { color: #95a6bb; font-size: 9px; }
+.research-candidates-heading h2 { font-size: 22px; font-weight: 590; letter-spacing: -.55px; margin: 6px 0 9px; color: #354357; }
+.research-candidates-heading p { font-size: 11px; color: #95a2b3; line-height: 1.8; margin: 0 0 20px; }
+.research-candidate-list { display: flex; flex-direction: column; gap: 11px; }
+.research-candidate { border: 1px solid #e7ecf3; border-radius: 11px; background: #fff; transition: border-color .16s, box-shadow .16s; }
+.research-candidate:hover { border-color: #c5d6ed; box-shadow: 0 3px 12px #3377ee07; }
+.research-candidate-open { display: block; width: 100%; text-align: left; padding: 15px 15px 10px; border-radius: 10px 10px 0 0; }
+.research-candidate-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #506987; font-size: 13px; font-weight: 550; line-height: 1.6; }
+.research-candidate-title svg { color: #a3b5cb; }
+.research-candidate-open:hover .research-candidate-title { color: var(--blue); }
+.research-candidate-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; color: #8996a9; font-size: 11px; line-height: 1.85; margin-top: 7px; }
+.research-candidate-source { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: #a5b1c1; margin: 0 15px 13px; }
+.research-candidate-source:hover { color: var(--blue); }
+.research-candidate-footnote { display: block; color: #acb5c3; font-size: 9px; margin-top: 20px; }
+.research-candidate-note { font-size: 11px; color: #93a1b3; line-height: 1.8; margin-top: 20px; }
 .selection-indicator { width: 5px; height: 5px; background: #a5bfeb; border-radius: 50%; }
 .research-fact { padding: 20px 0; border-bottom: 1px solid #e9edf3; }
 .fact-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #a8b3c2; font-size: 9px; margin-bottom: 9px; }

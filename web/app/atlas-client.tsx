@@ -9,10 +9,11 @@ import { blocksFromContent, contentFromBlocks, notebookResearchQuery } from "@/l
 type User = { id: string; email: string };
 type Picture = { url: string; thumbnail: string; sourceUrl: string; caption: string; license: string; attribution: string };
 type Fact = { id: string; text: string; section: string; sourceUrl: string };
-type Research = { title: string; category: string; subcategory: string; sourceUrl: string; facts: Fact[]; images: Picture[]; error?: string };
+type ResearchCandidate = { title: string; snippet: string; sourceUrl: string };
+type Research = { title: string; category: string; subcategory: string; sourceUrl: string; facts: Fact[]; images: Picture[]; candidates?: ResearchCandidate[]; error?: string };
 type Pen = "selection" | "yellow" | "red";
 type Notice = { kind: "success" | "error"; text: string };
-type Pending = { kind: "search" | "save"; content: string; entryId?: string };
+type Pending = { kind: "search" | "save"; content: string; entryId?: string; exactTitle?: boolean };
 type ResearchGroup = { entry: Entry | null; queue: Promise<void>; seen: Set<string>; pending: number };
 type IllustrationState = { content: string; phase: "loading" | "ready" | "unavailable" };
 type Recognition = { lang: string; continuous: boolean; interimResults: boolean; onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null; onend: (() => void) | null; onerror: ((event: { error: string }) => void) | null; start: () => void; stop: () => void };
@@ -129,8 +130,8 @@ export default function AtlasClient() {
   const [draft, setDraft] = useState(""), [saving, setSaving] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false), [catalogQuery, setCatalogQuery] = useState(""), [chapter, setChapter] = useState("All notes");
   const [accountOpen, setAccountOpen] = useState(false), [authMode, setAuthMode] = useState<"signin" | "signup" | null>(null), [notice, setNotice] = useState<Notice | null>(null);
-  const [researchOpen, setResearchOpen] = useState(false), [research, setResearch] = useState<Research | null>(null), [researchQuery, setResearchQuery] = useState("");
-  const [researchLoading, setResearchLoading] = useState(false), [researchError, setResearchError] = useState(""), [researchSaving, setResearchSaving] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false), [research, setResearch] = useState<Research | null>(null), [researchQuery, setResearchQuery] = useState(""), [researchExactTitle, setResearchExactTitle] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false), [researchError, setResearchError] = useState(""), [researchErrorStatus, setResearchErrorStatus] = useState<number | null>(null), [researchSaving, setResearchSaving] = useState(false);
   const [researchEntryId, setResearchEntryId] = useState<string | null>(null);
   const [pen, setPen] = useState<Pen>("selection"), [readerMenu, setReaderMenu] = useState(false), [deleteId, setDeleteId] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false), [listening, setListening] = useState(false);
@@ -278,28 +279,30 @@ export default function AtlasClient() {
       } catch (error) { if (error instanceof ApiError && error.currentEntry) putEntry(error.currentEntry, epoch); throw error; }
     });
   }
-  async function doResearch(query: string) {
+  async function doResearch(query: string, exactTitle = false) {
     if (!await flushEditor()) return;
     const id = ++researchRequestRef.current, epoch = sessionEpochRef.current;
     const note = currentEntriesRef.current.find((entry) => entry.id === activeIdRef.current) || null;
     const group = newGroup(); group.entry = note; groupRef.current = group;
-    setResearchOpen(true); setResearchLoading(true); setResearchError(""); setResearch(null); setResearchQuery(query); setPen("selection"); setNotice(null); setResearchSaving(false); setResearchEntryId(note?.id || null);
-    try { const data = await request<Research>("/api/research", { method: "POST", body: JSON.stringify({ content: query }) }); if (id !== researchRequestRef.current || epoch !== sessionEpochRef.current) return; setResearch(data); if (data.error) setResearchError(data.error); else if (!data.facts.length) setResearchError("No article found. Try a more specific topic."); }
-    catch (error) { if (id === researchRequestRef.current && epoch === sessionEpochRef.current) setResearchError(errorMessage(error)); }
+    setResearchOpen(true); setResearchLoading(true); setResearchError(""); setResearchErrorStatus(null); setResearch(null); setResearchQuery(query); setResearchExactTitle(exactTitle); setPen("selection"); setNotice(null); setResearchSaving(false); setResearchEntryId(note?.id || null);
+    try { const data = await request<Research>("/api/research", { method: "POST", body: JSON.stringify({ content: query, exactTitle }) }); if (id !== researchRequestRef.current || epoch !== sessionEpochRef.current) return; setResearch(data); if (data.error) setResearchError(data.error); else if (!data.facts.length && !data.candidates?.length) setResearchError("No article found. Try a more specific topic."); }
+    catch (error) { if (id === researchRequestRef.current && epoch === sessionEpochRef.current) { setResearchError(errorMessage(error)); setResearchErrorStatus(error instanceof ApiError ? error.status : null); } }
     finally { if (id === researchRequestRef.current && epoch === sessionEpochRef.current) setResearchLoading(false); }
   }
-  function searchContent(query: string) {
+  function searchContent(query: string, exactTitle = false) {
     if (!query.trim()) return;
-    const search = query.length > 30000 ? query.slice(0, 30000) : query;
-    if (!user) { pendingRef.current = { kind: "search", content: search }; setAuthMode("signup"); return; }
-    void doResearch(search);
+    const limit = exactTitle ? 200 : 30000;
+    const search = query.length > limit ? query.slice(0, limit) : query;
+    if (!user) { pendingRef.current = { kind: "search", content: search, exactTitle }; setAuthMode("signup"); return; }
+    void doResearch(search, exactTitle);
   }
   async function signedIn(account: User) {
+    if (currentUserRef.current && currentUserRef.current.id !== account.id && editorRef.current?.isDirty()) throw new Error("Your current notebook has unsaved changes. Sign in with its original account to continue saving them.");
     sessionEpochRef.current++; illustrationAttemptsRef.current.clear(); illustrationRequestsRef.current.clear(); setIllustrations({});
     if (currentUserRef.current?.id !== account.id) { setEntries([]); currentEntriesRef.current = []; activeIdRef.current = null; setActiveId(null); setResearch(null); setResearchOpen(false); setResearchEntryId(null); groupRef.current = newGroup(); }
     currentUserRef.current = account; setEntriesLoading(true); setUser(account); setSessionReady(true); setAuthMode(null);
     const pending = pendingRef.current; pendingRef.current = null;
-    if (pending?.kind === "search") await doResearch(pending.content); else if (pending?.kind === "save") await persistContent(pending.content);
+    if (pending?.kind === "search") await doResearch(pending.content, pending.exactTitle); else if (pending?.kind === "save") await persistContent(pending.content);
   }
   async function signOut() {
     if (!await prepareNavigation()) return;
@@ -413,8 +416,8 @@ export default function AtlasClient() {
       </div>}
     </div>
 
-    {researchOpen ? <aside className="research-panel" aria-label="Research"><div className="research-top"><span><Search size={16} />Research</span><div className="research-top-actions"><a className="google-link" href={`https://www.google.com/search?q=${encodeURIComponent(researchQuery)}`} target="_blank" rel="noreferrer" title="Broaden this search on Google">Google<ExternalLink size={11} /></a><IconButton label="Close research" onClick={() => setResearchOpen(false)}><X size={18} /></IconButton></div></div><form className="research-query" onSubmit={(event) => { event.preventDefault(); searchContent(researchQuery.trim()); }}><input aria-label="Research topic" placeholder="A topic, passage, or article URL" value={researchQuery} maxLength={30000} onChange={(event) => setResearchQuery(event.target.value)} /><IconButton label="Search topic" disabled={researchLoading || !researchQuery.trim()} onClick={() => searchContent(researchQuery.trim())}><Search size={17} /></IconButton></form>
-      {researchLoading ? <div className="research-loading"><LoaderCircle size={24} className="spin" /><h2>Finding your topic</h2><p>Looking for English sources and reference images.</p><div className="research-skeleton"><i /><i /><i /><i /></div></div> : researchError ? <div className="research-error"><Search size={24} /><h2>Try another topic</h2><p>{researchError}</p><button type="button" className="text-button" onClick={() => void doResearch(researchQuery)}>Try again<ArrowRight size={14} /></button></div> : research ? <><div className="research-title-row"><div><span className="research-category">{research.category}</span><h2>{research.title}</h2></div><a className="source-link icon-button" aria-label="Read original article" title="Read original article" href={safeLink(research.sourceUrl)} target="_blank" rel="noreferrer"><ExternalLink size={17} /></a></div>
+    {researchOpen ? <aside className="research-panel" aria-label="Research"><div className="research-top"><span><Search size={16} />Research</span><div className="research-top-actions"><a className="google-link" href={`https://www.google.com/search?q=${encodeURIComponent(researchQuery)}`} target="_blank" rel="noreferrer" title="Broaden this search on Google">Google<ExternalLink size={11} /></a><IconButton label="Close research" onClick={() => setResearchOpen(false)}><X size={18} /></IconButton></div></div><form className="research-query" onSubmit={(event) => { event.preventDefault(); searchContent(researchQuery.trim()); }}><input aria-label="Research topic" placeholder="A topic, passage, or article URL" value={researchQuery} maxLength={30000} onChange={(event) => { setResearchQuery(event.target.value); setResearchExactTitle(false); }} /><IconButton label="Search topic" disabled={researchLoading || !researchQuery.trim()} onClick={() => searchContent(researchQuery.trim())}><Search size={17} /></IconButton></form>
+      {researchLoading ? <div className="research-loading"><LoaderCircle size={24} className="spin" /><h2>Finding your topic</h2><p>Looking for English sources and reference images.</p><div className="research-skeleton"><i /><i /><i /><i /></div></div> : research?.candidates?.length ? <section className="research-candidates" aria-label="Related topics"><div className="research-candidates-heading"><span>English sources</span><h2>Related topics</h2><p>Choose a topic to explore its article and reference images.</p></div><div className="research-candidate-list">{research.candidates.slice(0, 6).map((candidate) => <div className="research-candidate" key={candidate.sourceUrl || candidate.title}><button type="button" className="research-candidate-open" onClick={() => searchContent(candidate.title, true)}><span className="research-candidate-title">{candidate.title}<ArrowRight size={15} /></span>{candidate.snippet ? <span className="research-candidate-snippet">{candidate.snippet}</span> : null}</button><a className="research-candidate-source" href={safeLink(candidate.sourceUrl)} target="_blank" rel="noreferrer" aria-label={`Open original source for ${candidate.title}`}>{sourceName(candidate.sourceUrl)}<ExternalLink size={10} /></a></div>)}</div>{research.error ? <p className="research-candidate-note">{research.error}</p> : null}<span className="research-candidate-footnote">Search public sources · No AI tokens used</span></section> : researchError ? <div className="research-error"><Search size={24} /><h2>{researchErrorStatus === 401 ? "Sign in to continue" : researchErrorStatus === 429 ? "Take a moment" : "Try another topic"}</h2><p>{researchError}</p><button type="button" className="text-button" onClick={() => { if (researchErrorStatus === 401) { pendingRef.current = { kind: "search", content: researchQuery, exactTitle: researchExactTitle }; setAuthMode("signin"); } else void doResearch(researchQuery, researchExactTitle); }}>{researchErrorStatus === 401 ? "Sign in" : "Try again"}<ArrowRight size={14} /></button></div> : research ? <><div className="research-title-row"><div><span className="research-category">{research.category}</span><h2>{research.title}</h2></div><a className="source-link icon-button" aria-label="Read original article" title="Read original article" href={safeLink(research.sourceUrl)} target="_blank" rel="noreferrer"><ExternalLink size={17} /></a></div>
         {research.images.length ? <section className="research-images research-images-first"><h3>Reference images</h3><div>{research.images.map((picture) => <PictureCard key={picture.sourceUrl} picture={picture} onKeep={() => keepPicture(picture)} kept={Boolean(entries.find((entry) => entry.id === researchEntryId)?.images.some((image) => image.sourceUrl === picture.sourceUrl))} />)}</div></section> : null}
         <div className="research-pen-row"><PenTools pen={pen} onChange={setPen} /><span aria-live="polite">{researchSaving ? <><LoaderCircle className="spin" size={13} />Saving passage</> : <><span className="selection-indicator" />Select to keep</>}</span></div>
         {researchEntryId ? <div className="research-target">Adding to <strong>{entries.find((entry) => entry.id === researchEntryId)?.title || "your note"}</strong></div> : null}

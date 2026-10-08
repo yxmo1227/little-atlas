@@ -12,6 +12,7 @@ A private online notebook with an English interface. Every new email account sta
 - Debounced cloud autosave shows its actual save state. Revision checks reject stale-device edits, preserving the current draft for review instead of silently overwriting newer work.
 - Automatic title and chapter inference from English or Chinese content, without a model call. The original wording is preserved; Chinese notes are not silently translated.
 - Source-linked English Wikipedia research and licensed Wikimedia Commons images. Research includes later sections instead of stopping at eighteen sentences; very long sources are bounded. Ordinary searches use public APIs and do not consume OpenAI tokens.
+- Broad searches return related English articles with source excerpts instead of requiring an exact encyclopedia title. Chinese character variants and redirects resolve to the canonical article; uncertain matches are offered as choices. Choosing a result preserves its exact title, including dotted names such as Crypto.com. Expired sessions retain the query and offer sign-in recovery.
 - Search a whole paragraph: the main topic is extracted before researching it. Saving content and opening an existing entry without pictures automatically looks up licensed reference images in the background. Unavailable images can be retried with **Find images**; your text is saved immediately and stays unchanged.
 - Paste a public HTTPS article link to import readable English passages. Other sites retain their original source and copyright; articles that require login or browser scripts may not be readable.
 - A selection pen saves the exact passage you drag over. Yellow and red pens persist annotations on saved text.
@@ -66,6 +67,7 @@ For a disposable local D1 test database, set `ATLAS_TEST_URL` to the running pre
 
 `node --test tests/notebook-live.test.mjs` checks heading and metadata persistence, edits from two separate sessions, stale-write rejection, longer articles, and private account isolation. It creates and deletes only disposable diagnostic accounts and requires a running preview with all migrations applied.
 
+`node --test tests/search-live.test.mjs` checks Chinese and English broad searches, their English article choices, full research with pictures, simplified/traditional Chinese title resolution, and exact dotted names such as Crypto.com. Set `ATLAS_TEST_URL` to the preview or deployment; its disposable account is removed after the check.
 `node --test tests/nyx-live.test.mjs` checks full-paragraph research, automatic licensed images, thumbnail loading, and preservation of saved images and markings. Integration checks require internet access and remove their disposable test accounts afterward. Use a local test database for combined account checks.
 
 ## Attribution
