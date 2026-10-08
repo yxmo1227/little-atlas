@@ -61,6 +61,8 @@ export const atlasEntries = sqliteTable('atlas_entries', {
   userId: text('user_id').notNull().references(() => atlasUser.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   content: text('content').notNull(),
+  blocks: text('blocks').notNull().default('[]'),
+  revision: integer('revision').notNull().default(0),
   category: text('category').notNull(),
   subcategory: text('subcategory').notNull(),
   sources: text('sources').notNull().default('[]'),

@@ -1,24 +1,28 @@
-# Little Atlas · 个人知识库
+# Little Atlas · 云端笔记本
 
 ## 最新版：网页版
 
 **[打开 Little Atlas](https://little-atlas-notebook.c8fmkxqy6h.chatgpt.site/)**
 
-用邮箱注册自己的私人字典，只需要填写 **Content**，标题、目录和正文排版会自动完成。界面使用英文，支持中文或英文输入。
+用邮箱注册自己的私人 **Notebook**。输入内容后点击 **＋**，进入可持续编辑的文章页面；首次标题和分类会自动生成，也可以自行修改。界面使用英文，支持中文或英文输入。
 
 - 输入一个主题或整段内容，联网查找有来源的英文资料。
+- 文章支持段落、标题和小标题；左侧文档大纲可以点击跳转，之后随时重新打开并增删内容。
+- 编辑后自动保存到账号的云端；在电脑、手机或 iPad 登录同一账号，可以打开之前保存的笔记。
+- 自动保存显示实际保存状态；两个设备同时编辑时会提示冲突并保留当前草稿，避免悄悄覆盖较新的内容。
 - 保存内容后自动寻找相关图片；以前没有图片的词条重新打开时也会补图，并保留图片来源、作者和许可。
 - 用选择笔留下需要的文字，用黄色荧光笔和红笔标注重点。
+- 选取的研究资料可以直接追加到正在打开的文章，保留原有小标题、标题和分类；也支持导出 Markdown。
 - 默认搜索、自动归类和配图不调用 AI 模型，不消耗模型 token。
-- 每个账号从空白字典开始，已保存的词条和标注只对该账号可见。
+- 每个账号从空白笔记本开始，已保存的文章、图片和标注只对该账号可见。
 
-本次更新修复了整段 Nyx 内容搜索和自动配图；已在发布网站验证图片加载、标注保留和刷新后的保存。
+最新版已验证文档小标题和分类保存、跨会话编辑、旧版本冲突提示、长文章，以及不同账号之间的数据隔离。
 
 网页版源码、安装步骤和检查命令见 **[web/README.md](web/README.md)**。邮箱目前作为登录名，尚未配置邮件验证和密码重置邮件。
 
 | 目录 | 内容 |
 | --- | --- |
-| `web/` | 最新网页版：账号、私人词条、联网搜索和自动配图 |
+| `web/` | 最新网页版：云端笔记、文档大纲、账号、联网搜索和自动配图 |
 | `dictionary_app/` | Windows 本地桌面版 |
 | `tests/` | 桌面版检查；网页版检查在 `web/tests/` |
 
@@ -72,7 +76,7 @@ py -m venv .venv
 
 ## English summary
 
-Little Atlas is a local Windows personal dictionary. Search a topic in Chinese or English, review cited English facts, paint exact phrases into your own entry, annotate them, and organize entries by chapter. Each install starts empty. Default research opens Google in the browser and uses public Wikimedia sources in the app, with no ChatGPT usage. Paste an English article's HTTPS URL to import excerpts. ChatGPT research remains an explicit optional action. Personal data is stored under the current user's local app-data folder.
+Little Atlas is an online personal notebook with private email accounts. Articles support headings, a clickable outline, editable titles and categories, cloud autosave, and revision checks for edits from multiple devices. Research includes cited English facts and licensed reference images; selected passages can be appended to an open note. Ordinary web research and organization use no AI model tokens. The Windows desktop dictionary remains available separately, with its data stored under the current user's local app-data folder.
 
 ## License
 

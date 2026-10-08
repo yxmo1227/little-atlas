@@ -25,6 +25,21 @@ test("animal physiology stays in nature and generic notes do not match organ", (
 
 function jsonResponse(value) { return new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } }); }
 
+test("research includes later article sections rather than stopping at eighteen sentences", async (context) => {
+  const sentences = Array.from({ length: 24 }, (_, index) => `Reference detail number ${index + 1} provides useful material for a notebook.`).join(' ');
+  context.mock.method(globalThis, 'fetch', async (input) => {
+    const url = new URL(input);
+    if (url.hostname === 'commons.wikimedia.org') return jsonResponse({ query: { pages: [] } });
+    if (url.searchParams.get('list') === 'search') return jsonResponse({ query: { search: [{ title: 'Expanded reference' }] } });
+    return jsonResponse({ query: { pages: [{ title: 'Expanded reference', extract: `${sentences}\n\n== Later section ==\nThis later section should remain available for selection and notes.`, fullurl: 'https://en.wikipedia.org/wiki/Expanded_reference' }] } });
+  });
+  const result = await researchTopic('Expanded reference');
+  assert.equal(result.error, undefined);
+  assert.equal(result.facts.length, 25);
+  assert.equal(result.facts.at(-1).section, 'Later section');
+  assert.match(result.facts.at(-1).text, /remain available/);
+});
+
 const nyxParagraph = "In Greek mythology, Nyx is the goddess and personification of the night. In Hesiod's Theogony, she is the offspring of Chaos, and the mother of Aether (Upper Sky) and Hemera (Day) by Erebus (Darkness). By herself, she produces a brood of children which are mainly personifications of primarily negative forces. She features in a number of early cosmogonies, which place her as one of the first deities to exist. In the works of poets and playwrights, she lives at the ends of the Earth, and is often described as a black-robed goddess who drives through the sky in a chariot pulled by horses. In the Iliad, Homer relates that even Zeus fears to displease her.";
 
 test("paragraph lookup extracts its subject in English, Chinese and bilingual notes", () => {

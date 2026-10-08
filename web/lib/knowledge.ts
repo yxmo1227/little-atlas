@@ -224,6 +224,8 @@ async function englishLink(title: string): Promise<string> {
   throw new Error("This topic has no linked English article yet. Try its English name.");
 }
 
+const MAX_RESEARCH_FACTS = 300;
+
 function splitFacts(extract: string, sourceUrl: string): ResearchFact[] {
   const facts: ResearchFact[] = [];
   const seen = new Set<string>();
@@ -239,10 +241,10 @@ function splitFacts(extract: string, sourceUrl: string): ResearchFact[] {
     for (const part of segments) {
       const text = part.segment.trim();
       const key = normal(text);
-      if (text.length < 35 || text.length > 900 || seen.has(key)) continue;
+      if (text.length < 20 || text.length > 15_000 || seen.has(key)) continue;
       seen.add(key);
       facts.push({ id: `fact-${facts.length + 1}`, text, section, sourceUrl });
-      if (facts.length >= 18) return facts;
+      if (facts.length >= MAX_RESEARCH_FACTS) return facts;
     }
   }
   return facts;
@@ -523,7 +525,7 @@ export async function researchUrl(rawUrl: string): Promise<ResearchResult> {
     const seen = new Set<string>();
     const facts = extracted.paragraphs.flatMap(({ text, section }) => splitFacts(text, url.href).map((fact) => ({ ...fact, section }))).filter((fact) => {
       const key = normal(fact.text); if (seen.has(key)) return false; seen.add(key); return true;
-    }).slice(0, 18).map((fact, index) => ({ ...fact, id: `fact-${index + 1}` }));
+    }).slice(0, MAX_RESEARCH_FACTS).map((fact, index) => ({ ...fact, id: `fact-${index + 1}` }));
     if (!facts.length) throw new Error("This page has no useful English article sentences. Try another source.");
     const organized = classifyContent(`${extracted.title}\n${facts.map((fact) => fact.text).join("\n")}`);
     const result: ResearchResult = { title: extracted.title || organized.title, category: organized.category, subcategory: organized.subcategory, sourceUrl: url.href, facts, images: [] };

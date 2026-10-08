@@ -1,10 +1,23 @@
 import { env } from 'cloudflare:workers';
 import { getAtlasUser } from '@/lib/auth';
-import { organizeEntry, parseEntry, validateEntryInput, InputError } from '@/lib/entry-data';
+import { parseEntry, validateEntryInput, InputError, type Entry } from '@/lib/entry-data';
 import { json, readBody, validMutation } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
+
+function conflict(entry: Entry) {
+  return json({ error: 'This note changed on another device. Review the latest version before saving.', code: 'CONFLICT', entry }, 409);
+}
+
+export async function GET(request: Request, context: Context) {
+  const user = await getAtlasUser(request);
+  if (!user) return json({ error: 'Sign in to open your notebook.' }, 401);
+  const { id } = await context.params;
+  const row = await env.DB!.prepare('SELECT * FROM atlas_entries WHERE id = ? AND user_id = ?').bind(id,user.id).first();
+  if (!row) return json({ error: 'Entry not found.' }, 404);
+  return json({ entry: parseEntry(row) });
+}
 
 export async function PATCH(request: Request, context: Context) {
   if (!validMutation(request)) return json({ error: 'This request is not allowed.' },403);
@@ -18,23 +31,31 @@ export async function PATCH(request: Request, context: Context) {
     const body = await readBody(request);
     const input = validateEntryInput(body,previous);
     const fields = body as Record<string,unknown>;
-    const changes: string[] = [], values: string[] = [];
-    if (Object.hasOwn(fields,'content')) { changes.push('content=?'); values.push(input.content); }
-    if (Object.hasOwn(fields,'sources')) { changes.push('sources=?'); values.push(JSON.stringify(input.sources)); }
-    if (Object.hasOwn(fields,'images')) { changes.push('images=?'); values.push(JSON.stringify(input.images)); }
-    if (Object.hasOwn(fields,'annotations') || input.content !== previous.content) { changes.push('annotations=?'); values.push(JSON.stringify(input.annotations)); }
-    if (Object.hasOwn(fields,'content') || Object.hasOwn(fields,'sources')) {
-      const metadata = organizeEntry(input);
-      changes.push('title=?','category=?','subcategory=?'); values.push(metadata.title,metadata.category,metadata.subcategory);
+    if (Object.hasOwn(fields, 'baseRevision')) {
+      if (!Number.isSafeInteger(fields.baseRevision) || Number(fields.baseRevision) < 0) throw new InputError('The note revision is invalid.');
+      if (fields.baseRevision !== previous.revision) return conflict(previous);
+    }
+    const changes: string[] = [], values: (string | number)[] = [];
+    if (Object.hasOwn(fields,'content') || Object.hasOwn(fields,'blocks')) {
+      if (input.content !== previous.content) { changes.push('content=?'); values.push(input.content); }
+      if (JSON.stringify(input.blocks) !== JSON.stringify(previous.blocks)) { changes.push('blocks=?'); values.push(JSON.stringify(input.blocks)); }
+    }
+    for (const key of ['sources','images','annotations'] as const) {
+      if ((Object.hasOwn(fields,key) || (key === 'annotations' && input.content !== previous.content)) && JSON.stringify(input[key]) !== JSON.stringify(previous[key])) {
+        changes.push(`${key}=?`); values.push(JSON.stringify(input[key]));
+      }
+    }
+    for (const key of ['title','category','subcategory'] as const) {
+      if (Object.hasOwn(fields,key) && input[key] !== previous[key]) { changes.push(`${key}=?`); values.push(input[key]!); }
     }
     if (!changes.length) return json({entry:previous});
-    changes.push('updated_at=?'); values.push(new Date().toISOString());
-    // Partial writes preserve concurrently fetched pictures; reject conflicting text/mark edits.
-    const updated = await env.DB!.prepare(`UPDATE atlas_entries SET ${changes.join(',')} WHERE id=? AND user_id=? AND updated_at=?`)
-      .bind(...values,id,user.id,previous.updatedAt).run();
-    if (!updated.meta.changes) return json({error:'This entry changed while saving. Reopen it and try again.'},409);
+    changes.push('updated_at=?','revision=revision+1'); values.push(new Date().toISOString());
+    // User edits share a revision; independent picture enrichment uses partial writes.
+    const updated = await env.DB!.prepare(`UPDATE atlas_entries SET ${changes.join(',')} WHERE id=? AND user_id=? AND revision=?`)
+      .bind(...values,id,user.id,previous.revision).run();
     const current = await env.DB!.prepare('SELECT * FROM atlas_entries WHERE id=? AND user_id=?').bind(id,user.id).first();
     if (!current) return json({error:'Entry not found.'},404);
+    if (!updated.meta.changes) return conflict(parseEntry(current));
     return json({entry:parseEntry(current)});
   } catch (error) {
     if (error instanceof InputError || error instanceof SyntaxError) return json({ error:error.message },400);

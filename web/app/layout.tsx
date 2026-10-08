@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Little Atlas · Your personal dictionary",
-  description: "Write what you learned. Little Atlas organizes it into your own private knowledge library, with source-linked English research.",
+  title: "Little Atlas · Your private notebook",
+  description: "A private notebook for ideas, articles, and discoveries. Write, organize, and research with English sources and reference images.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

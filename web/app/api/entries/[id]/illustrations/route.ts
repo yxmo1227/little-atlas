@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { getAtlasUser } from '@/lib/auth';
 import { parseEntry, validateEntryInput, InputError } from '@/lib/entry-data';
 import { researchImages } from '@/lib/knowledge';
+import { notebookResearchQuery } from '@/lib/notebook';
 import { json, readBody, validMutation } from '@/lib/http';
 import { allowResearch } from '@/lib/research-limit';
 
@@ -22,7 +23,7 @@ export async function POST(request: Request, context: Context) {
     await readBody(request);
     if (previous.images.length) return json({entry:previous,status:'ready'});
     if (!await allowResearch(user.id)) return json({error:'Take a moment before finding more images.'},429);
-    const images = (await researchImages(previous.content)).slice(0,3);
+    const images = (await researchImages(notebookResearchQuery(previous.blocks,previous.content,previous.sources))).slice(0,3);
     if (images.length) {
       const safe = validateEntryInput({images}, previous).images;
       // An edit, manual image selection, or deletion during lookup wins over this request.

@@ -10,9 +10,9 @@ export function validMutation(request: Request): boolean {
 
 export async function readBody(request: Request): Promise<unknown> {
   const declared = Number(request.headers.get('content-length'));
-  if (declared > 150_000) throw new InputError('This entry is too large.');
+  if (declared > 1_500_000) throw new InputError('This note is too large.');
   const text = await request.text();
-  if (text.length > 150_000) throw new InputError('This entry is too large.');
+  if (text.length > 1_500_000) throw new InputError('This note is too large.');
   try { return JSON.parse(text); } catch { throw new InputError('The entry could not be read.'); }
 }
 import { InputError } from './entry-data';
